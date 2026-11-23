@@ -1,0 +1,15 @@
+KRATOS Proprietary Binary Distribution License
+
+Copyright (c) 2026 KRATOS (https://kratos-os.online). All rights reserved.
+
+This repository hosts only official compiled, signed release binaries, SHA-256
+verification checksums, and release metadata manifests for KRATOS.
+
+1. No Open-Source Grant: Nothing in this repository grants permission to
+   decompile, reverse-engineer, redistribute modified binaries, or access
+   proprietary source code.
+2. Permitted Use: End users may download and install official, unmodified APK
+   packages solely for personal use of the KRATOS application in accordance
+   with https://kratos-os.online.
+3. Verification: Always verify downloaded packages against the accompanying
+   `.sha256` file and official signing key.
