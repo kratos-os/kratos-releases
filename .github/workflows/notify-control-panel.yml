@@ -1,0 +1,93 @@
+name: Notify KRATOS Control Panel
+
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Optional release tag (defaults to latest release)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch release metadata and notify Control Panel
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag_name }}
+          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WEBHOOK_SECRET: ${{ secrets.KRATOS_RELEASE_WEBHOOK_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          repo = os.environ["GITHUB_REPO"].strip()
+          tag = os.environ.get("RELEASE_TAG", "").strip()
+          gh_token = os.environ["GITHUB_TOKEN"].strip()
+          webhook_secret = os.environ["WEBHOOK_SECRET"].strip()
+
+          if not webhook_secret:
+              raise RuntimeError("KRATOS_RELEASE_WEBHOOK_SECRET is not configured")
+
+          if tag:
+              quoted_tag = urllib.parse.quote(tag, safe="")
+              release_url = f"https://api.github.com/repos/{repo}/releases/tags/{quoted_tag}"
+          else:
+              release_url = f"https://api.github.com/repos/{repo}/releases/latest"
+
+          req = urllib.request.Request(
+              release_url,
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {gh_token}",
+                  "User-Agent": "KRATOS-Releases-Notifier/1.0",
+              },
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              release_obj = json.loads(resp.read().decode("utf-8"))
+
+          assets = release_obj.get("assets") or []
+          apk_assets = [a for a in assets if str(a.get("name", "")).lower().endswith(".apk")]
+          if not apk_assets:
+              raise RuntimeError(f"Release {release_obj.get('tag_name')} has no .apk asset attached")
+
+          payload = json.dumps({
+              "action": "published",
+              "release": release_obj,
+          }).encode("utf-8")
+
+          webhook_req = urllib.request.Request(
+              "https://kratos-os.online/functions/v1/admin-release-hub?action=github-webhook",
+              data=payload,
+              method="POST",
+              headers={
+                  "Content-Type": "application/json; charset=utf-8",
+                  "X-GitHub-Event": "release",
+                  "X-Kratos-Release-Secret": webhook_secret,
+              },
+          )
+          try:
+              with urllib.request.urlopen(webhook_req, timeout=30) as hook_resp:
+                  status = hook_resp.status
+                  body = json.loads(hook_resp.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              err_body = exc.read().decode("utf-8", errors="replace")
+              raise RuntimeError(f"Webhook returned HTTP {exc.code}: {err_body}") from exc
+
+          if status != 200 or not body.get("staged"):
+              raise RuntimeError(f"Control panel staging failed: status={status}, body={body}")
+
+          draft = body.get("draft") or {}
+          print("Staged release:", draft.get("tag_name"), "v" + str(draft.get("version")), "build", draft.get("build_number"))
+          print("Push dispatch:", json.dumps(body.get("pushResult") or {}))
+          PY
